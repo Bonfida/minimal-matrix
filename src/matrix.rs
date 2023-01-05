@@ -29,6 +29,7 @@ pub struct SendBody {
     pub body: String,
 }
 
+#[derive(Clone)]
 pub struct MatrixClient {
     pub client: reqwest::Client,
     pub home_server_name: String,
@@ -67,7 +68,10 @@ impl MatrixClient {
         };
         let res: LoginResponse = self
             .client
-            .post(format!("https://{}.element.io/_matrix/client/v3/login", self.home_server_name))
+            .post(format!(
+                "https://{}.element.io/_matrix/client/v3/login",
+                self.home_server_name
+            ))
             .json(&body)
             .send()
             .await?
@@ -82,7 +86,7 @@ impl MatrixClient {
             msgtype: "m.text".to_string(),
             body: message,
         };
-       let resp = self.client
+        self.client
             .put(format!(
                 "https://{}.ems.host/_matrix/client/r0/rooms/{}/send/m.room.message/{}",
                 self.home_server_name, self.room_id, now
@@ -110,4 +114,3 @@ async fn test() {
     client.login().await.unwrap();
     client.send_message("Test".to_string()).await.unwrap();
 }
-
