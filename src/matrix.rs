@@ -1,9 +1,4 @@
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc,
-};
-
-use crate::{error::MatrixClientError, utils::current_time};
+use crate::{error::MatrixClientError};
 use {
     serde,
     serde::{Deserialize, Serialize},
@@ -42,7 +37,6 @@ pub struct MatrixClient {
     pub room_id: String,
     pub user: String,
     pub password: String,
-    pub msg_counter: Arc<AtomicU64>,
 }
 
 impl MatrixClient {
@@ -54,7 +48,6 @@ impl MatrixClient {
             user,
             password,
             access_token: String::default(),
-            msg_counter: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -88,13 +81,11 @@ impl MatrixClient {
     }
 
     pub async fn send_message(&self, message: String) -> Result<(), MatrixClientError> {
-        let now = current_time();
         let body = SendBody {
             msgtype: "m.text".to_string(),
             body: message,
         };
-        let txn_id =
-            (now as u128) << 64 + (self.msg_counter.fetch_add(1, Ordering::Acquire) as u128);
+        let txn_id = uuid::Uuid::new_v4();
         self.client
             .put(format!(
                 "https://{}.ems.host/_matrix/client/r0/rooms/{}/send/m.room.message/{}",
