@@ -3,6 +3,7 @@ use derive_more::{Display, Error};
 #[derive(Debug, Display, Error)]
 pub enum MatrixClientError {
     Reqwest(reqwest::Error),
+    TooManyRequest,
 }
 
 impl From<reqwest::Error> for MatrixClientError {
