@@ -88,7 +88,7 @@ impl MatrixClient {
         let txn_id = uuid::Uuid::new_v4();
         self.client
             .put(format!(
-                "https://{}.ems.host/_matrix/client/r0/rooms/{}/send/m.room.message/{}",
+                "https://{}.ems.host/_matrix/client/v3/rooms/{}/send/m.room.message/{}",
                 self.home_server_name, self.room_id, txn_id
             ))
             .bearer_auth(self.access_token.clone())
