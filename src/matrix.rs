@@ -97,7 +97,7 @@ impl MatrixClient {
         Ok(())
     }
 
-    pub fn send_message(&mut self, message: String) -> Result<(), MatrixClientError> {
+    pub fn send_message(&self, message: String) -> Result<(), MatrixClientError> {
         self.message_q.send(message).unwrap();
         Ok(())
     }
@@ -183,7 +183,7 @@ async fn test() {
         let access_token = access_token.clone();
         let room_id = room_id.clone();
         let h = tokio::spawn(async {
-            let mut client = MatrixClient::new(home_server_name, room_id, access_token)
+            let client = MatrixClient::new(home_server_name, room_id, access_token)
                 .await
                 .unwrap();
             client.send_message(messages).unwrap();
