@@ -138,6 +138,7 @@ pub async fn run(
             }
 
             interval.reset();
+            timed_out = false;
         }
 
         if messages_q.len() > 10 {
