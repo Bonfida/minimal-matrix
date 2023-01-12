@@ -45,8 +45,6 @@ pub struct MatrixClient {
     pub home_server_name: String,
     pub access_token: String,
     pub room_id: String,
-    pub user: String,
-    pub password: String,
     pub sleep_until: Arc<RwLock<Instant>>,
     pub message_q: tokio::sync::mpsc::UnboundedSender<String>,
 }
@@ -55,52 +53,19 @@ impl MatrixClient {
     pub async fn new(
         home_server_name: String,
         room_id: String,
-        user: String,
-        password: String,
+        access_token: String,
     ) -> Result<Self, MatrixClientError> {
         let (snd, rcv) = tokio::sync::mpsc::unbounded_channel::<String>();
-        let mut client = Self {
+        let client = Self {
             client: reqwest::Client::new(),
             home_server_name,
             room_id,
-            user,
-            password,
-            access_token: String::default(),
+            access_token,
             sleep_until: Arc::new(RwLock::new(Instant::now())),
             message_q: snd,
         };
-        client.login().await?;
         tokio::spawn(run(rcv, client.clone()));
         Ok(client)
-    }
-
-    pub async fn login(&mut self) -> Result<(), MatrixClientError> {
-        let access_token = self.get_access_token().await?;
-        self.access_token = access_token;
-        Ok(())
-    }
-
-    pub async fn get_access_token(&self) -> Result<String, MatrixClientError> {
-        let body = LoginBody {
-            _type: "m.login.password".to_owned(),
-            password: self.password.clone(),
-            identifier: Identifier {
-                _type: "m.id.user".to_owned(),
-                user: self.user.clone(),
-            },
-        };
-        let res: LoginResponse = self
-            .client
-            .post(format!(
-                "https://{}.element.io/_matrix/client/v3/login",
-                self.home_server_name
-            ))
-            .json(&body)
-            .send()
-            .await?
-            .json()
-            .await?;
-        Ok(res.access_token)
     }
 
     pub async fn _send_message(&mut self, message: String) -> Result<(), MatrixClientError> {
@@ -155,7 +120,6 @@ pub async fn run(
             let message = messages_q.join("\n");
             match matrix_client.clone()._send_message(message).await {
                 Ok(_) => messages_q.clear(),
-                Err(MatrixClientError::TooManyRequest) => continue,
                 Err(_) => (),
             }
             interval.reset();
@@ -187,27 +151,36 @@ pub async fn run(
 #[tokio::test]
 async fn test() {
     use dotenv::dotenv;
+    use futures::future::join_all;
     use std::env;
+
     dotenv().ok();
     let home_server_name = env::var("HOME_SERVER_NAME").unwrap();
     let room_id = env::var("ROOM_ID").unwrap();
-    let user = env::var("MATRIX_USER").unwrap();
-    let password = env::var("MATRIX_PASSWORD").unwrap();
-
-    let mut client = MatrixClient::new(home_server_name, room_id, user, password)
-        .await
-        .unwrap();
+    let access_token = env::var("ACCESS_TOKEN").unwrap();
 
     let mut i = 0;
+    let mut handles = vec![];
     loop {
-        client.send_message(format!("Test {i}")).unwrap();
+        let messages = format!("Test {i}");
+        let home_server_name = home_server_name.clone();
+        let access_token = access_token.clone();
+        let room_id = room_id.clone();
+        let h = tokio::spawn(async {
+            let mut client = MatrixClient::new(home_server_name, room_id, access_token)
+                .await
+                .unwrap();
+            client.send_message(messages).unwrap();
+        });
+        handles.push(h);
 
         i += 1;
 
-        if i == 100 {
+        if i == 10 {
             break;
         }
     }
 
+    join_all(handles).await;
     tokio::time::sleep(Duration::from_secs(100)).await;
 }
