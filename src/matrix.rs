@@ -120,7 +120,10 @@ pub async fn run(
 
             let message = messages_q.join("\n");
             match matrix_client.clone()._send_message(message).await {
-                Ok(_) => messages_q.clear(),
+                Ok(_) => {
+                    messages_q.clear();
+                    retry = 0
+                }
                 Err(MatrixClientError::TooManyRequest) => continue,
                 Err(_) => retry += 1,
             }
