@@ -110,6 +110,7 @@ pub async fn run(
     let mut timed_out = false;
     let mut interval = tokio::time::interval(Duration::from_secs(5));
     let mut messages_q: Vec<String> = vec![];
+    let mut retry = 0;
 
     loop {
         if messages_q.len() > 10 || (timed_out && !messages_q.is_empty()) {
@@ -120,8 +121,19 @@ pub async fn run(
             let message = messages_q.join("\n");
             match matrix_client.clone()._send_message(message).await {
                 Ok(_) => messages_q.clear(),
-                Err(_) => (),
+                Err(MatrixClientError::TooManyRequest) => continue,
+                Err(_) => retry += 1,
             }
+
+            if retry == 50 {
+                eprintln!(
+                    "Reached max retry\n Clearing following messages:\n{:?}",
+                    messages_q
+                );
+                messages_q.clear();
+                retry = 0;
+            }
+
             interval.reset();
         }
 
