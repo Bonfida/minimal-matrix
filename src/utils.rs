@@ -6,3 +6,10 @@ pub fn current_time() -> u64 {
         .unwrap()
         .as_secs()
 }
+
+pub fn generate_tx_id(message: &str) -> String {
+    let now = current_time();
+    let mut m = sha1_smol::Sha1::new();
+    m.update(format!("{}{}", now, message).as_bytes());
+    m.digest().to_string()
+}

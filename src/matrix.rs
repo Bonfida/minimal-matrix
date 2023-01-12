@@ -1,13 +1,11 @@
-use crate::{error::MatrixClientError, utils::current_time};
+use crate::{error::MatrixClientError, utils::generate_tx_id};
 use {
     reqwest::StatusCode,
     serde,
     serde::{Deserialize, Serialize},
-    std::sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    },
+    std::sync::Arc,
     std::time::Duration,
+    tokio::sync::RwLock,
     tokio::time::Instant,
 };
 
@@ -49,22 +47,31 @@ pub struct MatrixClient {
     pub room_id: String,
     pub user: String,
     pub password: String,
-    pub msg_counter: Arc<AtomicU64>,
-    pub sleep_until: Instant,
+    pub sleep_until: Arc<RwLock<Instant>>,
+    pub message_q: tokio::sync::mpsc::UnboundedSender<String>,
 }
 
 impl MatrixClient {
-    pub fn new(home_server_name: String, room_id: String, user: String, password: String) -> Self {
-        Self {
+    pub async fn new(
+        home_server_name: String,
+        room_id: String,
+        user: String,
+        password: String,
+    ) -> Result<Self, MatrixClientError> {
+        let (snd, rcv) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let mut client = Self {
             client: reqwest::Client::new(),
             home_server_name,
             room_id,
             user,
             password,
             access_token: String::default(),
-            msg_counter: Arc::new(AtomicU64::new(0)),
-            sleep_until: Instant::now(),
-        }
+            sleep_until: Arc::new(RwLock::new(Instant::now())),
+            message_q: snd,
+        };
+        client.login().await?;
+        tokio::spawn(run(rcv, client.clone()));
+        Ok(client)
     }
 
     pub async fn login(&mut self) -> Result<(), MatrixClientError> {
@@ -97,13 +104,11 @@ impl MatrixClient {
     }
 
     pub async fn _send_message(&mut self, message: String) -> Result<(), MatrixClientError> {
-        let now = current_time();
         let body = SendBody {
             msgtype: "m.text".to_string(),
             body: message.clone(),
         };
-        let txn_id =
-            (now as u128) << (64 + (self.msg_counter.fetch_add(1, Ordering::Acquire) as u128));
+        let txn_id = generate_tx_id(&message);
         let res = self
             .client
             .put(format!(
@@ -117,7 +122,8 @@ impl MatrixClient {
 
         if res.status() == StatusCode::TOO_MANY_REQUESTS {
             let res = res.json::<SendResponseError>().await.unwrap();
-            self.sleep_until = Instant::now()
+            let mut guard = self.sleep_until.write().await;
+            *guard = Instant::now()
                 .checked_add(Duration::from_millis(res.retry_after_ms))
                 .unwrap();
             return Err(MatrixClientError::TooManyRequest);
@@ -126,15 +132,54 @@ impl MatrixClient {
         Ok(())
     }
 
-    pub async fn send_message(&mut self, message: String) -> Result<(), MatrixClientError> {
-        let res = self._send_message(message.clone()).await;
-        if let Err(MatrixClientError::TooManyRequest) = res {
-            // We only retry once if rate limited
-            tokio::time::sleep_until(self.sleep_until).await;
-            self._send_message(message).await?
+    pub fn send_message(&mut self, message: String) -> Result<(), MatrixClientError> {
+        self.message_q.send(message).unwrap();
+        Ok(())
+    }
+}
+
+pub async fn run(
+    mut rcv: tokio::sync::mpsc::UnboundedReceiver<String>,
+    matrix_client: MatrixClient,
+) {
+    let mut timed_out = false;
+    let mut interval = tokio::time::interval(Duration::from_secs(5));
+    let mut messages_q: Vec<String> = vec![];
+
+    loop {
+        if messages_q.len() > 10 || (timed_out && !messages_q.is_empty()) {
+            let deadline = matrix_client.sleep_until.read().await;
+            tokio::time::sleep_until(*deadline).await;
+            drop(deadline);
+
+            let message = messages_q.join("\n");
+            match matrix_client.clone()._send_message(message).await {
+                Ok(_) => messages_q.clear(),
+                Err(MatrixClientError::TooManyRequest) => continue,
+                Err(_) => (),
+            }
+            interval.reset();
         }
 
-        Ok(())
+        if messages_q.len() > 10 {
+            // Loop again to empty queue
+            continue;
+        }
+
+        tokio::select! {
+            o = rcv.recv() => {
+                if let Some(msg) = o {
+                    messages_q.push(msg);
+                } else {
+                    break;
+                }
+
+            }
+            _ = interval.tick() => {
+                timed_out = true;
+                continue
+            },
+        };
     }
 }
 
@@ -149,13 +194,20 @@ async fn test() {
     let user = env::var("MATRIX_USER").unwrap();
     let password = env::var("MATRIX_PASSWORD").unwrap();
 
-    let mut client = MatrixClient::new(home_server_name, room_id, user, password);
-    client.login().await.unwrap();
+    let mut client = MatrixClient::new(home_server_name, room_id, user, password)
+        .await
+        .unwrap();
 
     let mut i = 0;
     loop {
-        client.send_message("Test".to_string()).await.unwrap();
+        client.send_message(format!("Test {i}")).unwrap();
+
         i += 1;
-        println!("{i}");
+
+        if i == 100 {
+            break;
+        }
     }
+
+    tokio::time::sleep(Duration::from_secs(100)).await;
 }
