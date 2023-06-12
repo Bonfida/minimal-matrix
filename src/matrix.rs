@@ -116,6 +116,8 @@ pub async fn run(
 
     loop {
         if messages_q.len() > 10 || (timed_out && !messages_q.is_empty()) {
+            #[cfg(feature = "debug")]
+            eprintln!("Sending message batch");
             let deadline = matrix_client.sleep_until.read().await;
             tokio::time::sleep_until(*deadline).await;
             drop(deadline);
@@ -124,7 +126,10 @@ pub async fn run(
             match matrix_client.clone()._send_message(message).await {
                 Ok(_) => {
                     messages_q.clear();
-                    retry = 0
+                    retry = 0;
+
+                    #[cfg(feature = "debug")]
+                    eprintln!("Successfully sent message batch");
                 }
                 Err(MatrixClientError::TooManyRequest) => {
                     #[cfg(feature = "debug")]
