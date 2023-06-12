@@ -94,6 +94,13 @@ impl MatrixClient {
             return Err(MatrixClientError::TooManyRequest);
         }
 
+        #[cfg(feature = "debug")]
+        if !res.status().is_success() {
+            eprintln!("Matrix response error: {res:?}");
+            let body = res.text().await?;
+            eprintln!("With body:\n{body}");
+        }
+
         Ok(())
     }
 
