@@ -124,8 +124,16 @@ pub async fn run(
                     messages_q.clear();
                     retry = 0
                 }
-                Err(MatrixClientError::TooManyRequest) => continue,
-                Err(_) => retry += 1,
+                Err(MatrixClientError::TooManyRequest) => {
+                    #[cfg(feature = "debug")]
+                    eprintln!("Matrix: TooManyRequests");
+                    continue;
+                }
+                Err(e) => {
+                    #[cfg(feature = "debug")]
+                    eprintln!("{e:?}");
+                    retry += 1
+                }
             }
 
             if retry == 50 {
