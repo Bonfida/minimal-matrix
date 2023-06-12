@@ -111,6 +111,8 @@ pub async fn run(
     let mut interval = tokio::time::interval(Duration::from_secs(5));
     let mut messages_q: Vec<String> = vec![];
     let mut retry = 0;
+    #[cfg(feature = "debug")]
+    eprintln!("Running matrix client in debug mode");
 
     loop {
         if messages_q.len() > 10 || (timed_out && !messages_q.is_empty()) {
