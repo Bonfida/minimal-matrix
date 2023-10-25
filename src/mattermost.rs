@@ -4,6 +4,7 @@ use serde::Serialize;
 pub const ICON: &str = "https://mattermost.com/wp-content/uploads/2022/02/icon.png";
 pub const USERNAME: &str = "bot";
 
+#[derive(Clone, Debug)]
 pub struct MatterMost {
     pub client: reqwest::Client,
     pub url: String,
