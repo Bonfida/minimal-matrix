@@ -1,11 +1,16 @@
-use crate::{error::MatrixClientError, utils::generate_tx_id};
+use crate::{
+    error::MatrixClientError,
+    notif_trait::{run, Notifier},
+    utils::generate_tx_id,
+};
 use {
+    async_trait::async_trait,
     reqwest::StatusCode,
     serde,
     serde::{Deserialize, Serialize},
     std::sync::Arc,
     std::time::Duration,
-    tokio::sync::RwLock,
+    tokio::sync::{RwLock, RwLockReadGuard},
     tokio::time::Instant,
 };
 
@@ -49,26 +54,9 @@ pub struct MatrixClient {
     pub message_q: tokio::sync::mpsc::UnboundedSender<String>,
 }
 
-impl MatrixClient {
-    pub async fn new(
-        home_server_name: String,
-        room_id: String,
-        access_token: String,
-    ) -> Result<Self, MatrixClientError> {
-        let (snd, rcv) = tokio::sync::mpsc::unbounded_channel::<String>();
-        let client = Self {
-            client: reqwest::Client::new(),
-            home_server_name,
-            room_id,
-            access_token,
-            sleep_until: Arc::new(RwLock::new(Instant::now())),
-            message_q: snd,
-        };
-        tokio::spawn(run(rcv, client.clone()));
-        Ok(client)
-    }
-
-    pub async fn _send_message(&mut self, message: String) -> Result<(), MatrixClientError> {
+#[async_trait]
+impl Notifier for MatrixClient {
+    async fn _send_message(&mut self, message: String) -> Result<(), MatrixClientError> {
         let body = SendBody {
             msgtype: "m.text".to_string(),
             body: message.clone(),
@@ -97,69 +85,32 @@ impl MatrixClient {
         Ok(())
     }
 
-    pub fn send_message(&self, message: String) -> Result<(), MatrixClientError> {
+    fn send_message(&self, message: String) -> Result<(), MatrixClientError> {
         self.message_q.send(message).unwrap();
         Ok(())
     }
+    async fn get_sleep_until(&self) -> RwLockReadGuard<'_, Instant> {
+        self.sleep_until.read().await
+    }
 }
 
-pub async fn run(
-    mut rcv: tokio::sync::mpsc::UnboundedReceiver<String>,
-    matrix_client: MatrixClient,
-) {
-    let mut timed_out = false;
-    let mut interval = tokio::time::interval(Duration::from_secs(5));
-    let mut messages_q: Vec<String> = vec![];
-    let mut retry = 0;
-
-    loop {
-        if messages_q.len() > 10 || (timed_out && !messages_q.is_empty()) {
-            let deadline = matrix_client.sleep_until.read().await;
-            tokio::time::sleep_until(*deadline).await;
-            drop(deadline);
-
-            let message = messages_q.join("\n");
-            match matrix_client.clone()._send_message(message).await {
-                Ok(_) => {
-                    messages_q.clear();
-                    retry = 0
-                }
-                Err(MatrixClientError::TooManyRequest) => continue,
-                Err(_) => retry += 1,
-            }
-
-            if retry == 50 {
-                eprintln!(
-                    "Reached max retry\n Clearing following messages:\n{:?}",
-                    messages_q
-                );
-                messages_q.clear();
-                retry = 0;
-            }
-
-            interval.reset();
-            timed_out = false;
-        }
-
-        if messages_q.len() > 10 {
-            // Loop again to empty queue
-            continue;
-        }
-
-        tokio::select! {
-            o = rcv.recv() => {
-                if let Some(msg) = o {
-                    messages_q.push(msg);
-                } else {
-                    break;
-                }
-
-            }
-            _ = interval.tick() => {
-                timed_out = true;
-                continue
-            },
+impl MatrixClient {
+    pub async fn new(
+        home_server_name: String,
+        room_id: String,
+        access_token: String,
+    ) -> Result<Self, MatrixClientError> {
+        let (snd, rcv) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let client = Self {
+            client: reqwest::Client::new(),
+            home_server_name,
+            room_id,
+            access_token,
+            sleep_until: Arc::new(RwLock::new(Instant::now())),
+            message_q: snd,
         };
+        tokio::spawn(run(rcv, client.clone()));
+        Ok(client)
     }
 }
 
