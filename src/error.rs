@@ -4,6 +4,8 @@ use derive_more::{Display, Error};
 pub enum MatrixClientError {
     Reqwest(reqwest::Error),
     TooManyRequest,
+    HeaderParsing,
+    Parsing,
 }
 
 impl From<reqwest::Error> for MatrixClientError {
