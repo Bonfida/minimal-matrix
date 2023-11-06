@@ -3,4 +3,4 @@ pub mod matrix;
 pub mod mattermost;
 pub mod utils;
 
-pub(crate) mod notif_trait;
+pub mod notif_trait;
