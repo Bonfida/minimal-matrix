@@ -22,6 +22,8 @@ pub struct MatterMost {
     pub url: String,
     pub sleep_until: Arc<RwLock<Instant>>,
     pub message_q: tokio::sync::mpsc::UnboundedSender<String>,
+    #[cfg(feature = "log")]
+    pub encoder: log4rs::encode::pattern::PatternEncoder,
 }
 
 #[derive(Serialize)]
@@ -34,11 +36,17 @@ pub struct Message {
 impl MatterMost {
     pub fn new(url: &str) -> Self {
         let (snd, rcv) = tokio::sync::mpsc::unbounded_channel::<String>();
+        #[cfg(feature = "log")]
+        let encoder = log4rs::encode::pattern::PatternEncoder::new(
+            "`{d(%Y-%m-%d %H:%M:%S %Z)(utc)}: {l:<5} {f}:{L} - {m} {K(inner_error)( )}{K(tx_signature)( )}{K(trace)}{n}`",
+        );
         let client = Self {
             client: reqwest::Client::new(),
             url: url.to_owned(),
             message_q: snd,
             sleep_until: Arc::new(RwLock::new(Instant::now())),
+            #[cfg(feature = "log")]
+            encoder,
         };
         tokio::spawn(run(rcv, client.clone()));
         client
@@ -81,6 +89,21 @@ impl Notifier for MatterMost {
     async fn get_sleep_until(&self) -> RwLockReadGuard<'_, Instant> {
         self.sleep_until.read().await
     }
+}
+
+#[cfg(feature = "log")]
+impl log4rs::append::Append for MatterMost {
+    fn append(&self, record: &log::Record) -> anyhow::Result<()> {
+        use log4rs::encode::Encode;
+        let mut message_buffer: Vec<u8> = Vec::new();
+        let mut writer = log4rs::encode::writer::simple::SimpleWriter(&mut message_buffer);
+        self.encoder.encode(&mut writer, record)?;
+        let message = String::from_utf8(message_buffer)?;
+        self.send_message(message)?;
+        Ok(())
+    }
+
+    fn flush(&self) {}
 }
 
 #[cfg(test)]
