@@ -38,7 +38,7 @@ impl MatterMost {
         let (snd, rcv) = tokio::sync::mpsc::unbounded_channel::<String>();
         #[cfg(feature = "log")]
         let encoder = log4rs::encode::pattern::PatternEncoder::new(
-            "`{d(%Y-%m-%d %H:%M:%S %Z)(utc)}: {l:<5} {f}:{L} - {m} {K(inner_error)( )}{K(tx_signature)( )}{K(trace)}{n}`",
+            "`{d(%Y-%m-%d %H:%M:%S %Z)(utc)}: {l:<5} {f}:{L} - {m}{n}`",
         );
         let client = Self {
             client: reqwest::Client::new(),
